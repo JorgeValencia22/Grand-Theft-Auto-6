@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Grand Theft Auto VI</title>
+    <style>
+        /* CSS RESET & BASE STYLES */
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100vw;
+            height: 100dvh;
+            background: #000;
+            overflow: hidden;
+            cursor: none; /* Hide cursor during cinematic experience */
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #000;
+            user-select: none;
+        }
+
+        /* VIDEO LAYERS */
+        .video-layer {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            opacity: 0;
+            pointer-events: none; /* Prevent browser video interaction */
+        }
+
+        #introVideo {
+            opacity: 1; /* Visible by default on load */
+        }
+
+        /* PROMPT UI */
+        #prompt {
+            position: absolute;
+            bottom: 15%;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #fff;
+            font-size: 1.2rem;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            text-shadow: 0 2px 8px rgba(0,0,0,0.8);
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.8s ease-in-out;
+            visibility: hidden;
+        }
+
+        #prompt.active {
+            visibility: visible;
+            animation: pulsePrompt 2s infinite ease-in-out;
+        }
+
+        @keyframes pulsePrompt {
+            0% { opacity: 0.65; }
+            50% { opacity: 1; }
+            100% { opacity: 0.65; }
+        }
+
+        /* FINAL ERROR SCREEN */
+        #finalScreen {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: #000;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.8s ease;
+            text-align: center;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+
+        #finalScreen.visible {
+            visibility: visible;
+            opacity: 1;
+            cursor: default; /* Restore cursor for final screen */
+        }
+
+        #finalMessage {
+            color: #e0e0e0;
+            font-size: 1.1rem;
+            line-height: 1.5;
+            max-width: 600px;
+            margin-bottom: 30px;
+            font-weight: 400;
+        }
+
+        #acceptBtn {
+            background: transparent;
+            color: #fff;
+            border: 1px solid #555;
+            padding: 12px 40px;
+            font-size: 1rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            outline: none;
+        }
+
+        #acceptBtn:hover, #acceptBtn:focus {
+            background: rgba(255, 255, 255, 0.1);
+            border-color: #fff;
+        }
+
+        #acceptBtn:active {
+            background: rgba(255, 255, 255, 0.2);
+        }
+    </style>
+</head>
+<body>
+
+    <video id="introVideo" class="video-layer" src="./intro.mp4" playsinline preload="auto"></video>
+    <video id="mainVideo" class="video-layer" src="./main.mp4" playsinline preload="auto"></video>
+
+    <div id="prompt">Press any button</div>
+    
+    <div id="finalScreen">
+        <div id="finalMessage">
+            Your computer does not meet the minimum system requirements<br>to run Grand Theft Auto VI
+        </div>
+        <button id="acceptBtn">Accept</button>
+    </div>
+
+    <script>
+        /**
+         * STATE MACHINE
+         */
+        const STATES = {
+            INIT: "init",
+            INTRO: "intro",
+            PROMPT_READY: "prompt",
+            TRANSITIONING: "transitioning",
+            MAIN: "main",
+            ERROR: "error",
+            ENDED: "ended"
+        };
+
+        let currentState = STATES.INIT;
+
+        // DOM Elements
+        const introVideo = document.getElementById('introVideo');
+        const mainVideo = document.getElementById('mainVideo');
+        const promptUI = document.getElementById('prompt');
+        const finalScreen = document.getElementById('finalScreen');
+        const acceptBtn = document.getElementById('acceptBtn');
+
+        // Prevent default space/enter scrolling or selections globally
+        window.addEventListener('keydown', (e) => {
+            if (['Space', 'Enter', 'ArrowUp', 'ArrowDown'].includes(e.code)) {
+                e.preventDefault();
+            }
+        }, { passive: false });
+
+        /**
+         * INITIALIZATION & AUTOPLAY HANDLING
+         */
+        function initExperience() {
+            currentState = STATES.INTRO;
+            
+            // Attempt autoplay
+            const playPromise = introVideo.play();
+            
+            if (playPromise !== undefined) {
+                playPromise.catch(error => {
+                    // Autoplay with sound blocked by browser. 
+                    // Graceful fallback: Start muted to maintain cinematic visual,
+                    // unmute on the user's first interaction.
+                    introVideo.muted = true;
+                    introVideo.play().catch(e => console.error("Video playback failed", e));
+                    
+                    const unmuteHandler = () => {
+                        introVideo.muted = false;
+                        window.removeEventListener('pointerdown', unmuteHandler);
+                        window.removeEventListener('keydown', unmuteHandler);
+                    };
+                    window.addEventListener('pointerdown', unmuteHandler);
+                    window.addEventListener('keydown', unmuteHandler);
+                });
+            }
+        }
+
+        /**
+         * EXACT 27 SECOND TRIGGER
+         */
+        introVideo.addEventListener('timeupdate', () => {
+            if (currentState === STATES.INTRO && introVideo.currentTime >= 27) {
+                currentState = STATES.PROMPT_READY;
+                promptUI.classList.add('active');
+            }
+        });
+
+        // Failsafe: Prevent intro from looping or playing indefinitely if user walks away
+        introVideo.addEventListener('ended', () => {
+            if (currentState === STATES.PROMPT_READY) {
+                // If it ends naturally while waiting, pause on the last frame
+                introVideo.pause();
+            }
+        });
+
+        /**
+         * USER INPUT HANDLING
+         */
+        function handleInteraction(e) {
+            // Ignore input if we are not specifically waiting for it at the prompt
+            if (currentState !== STATES.PROMPT_READY) return;
+
+            // Lock state to prevent double triggers
+            currentState = STATES.TRANSITIONING;
+
+            // Remove prompt instantly visually
+            promptUI.classList.remove('active');
+            promptUI.style.opacity = '0';
+
+            // Begin Cinematic Fade
+            triggerCinematicFadeOut();
+        }
+
+        window.addEventListener('keydown', handleInteraction);
+        window.addEventListener('pointerdown', handleInteraction);
+
+        /**
+         * CINEMATIC FADE: AUDIO AND VISUAL
+         */
+        function triggerCinematicFadeOut() {
+            const duration = 2000; // 2000ms cinematic fade
+            const startVolume = introVideo.volume;
+            const startTime = performance.now();
+
+            function fadeStep(currentTime) {
+                const elapsed = currentTime - startTime;
+                const progress = Math.min(elapsed / duration, 1);
+
+                // Fade visual
+                introVideo.style.opacity = 1 - progress;
+                
+                // Fade audio
+                introVideo.volume = startVolume * (1 - progress);
+
+                if (progress < 1) {
+                    requestAnimationFrame(fadeStep);
+                } else {
+                    // Fade complete
+                    introVideo.pause();
+                    introVideo.volume = 0;
+                    
+                    // Brief black transition
+                    setTimeout(startMainSequence, 500); // 500ms black screen
+                }
+            }
+
+            requestAnimationFrame(fadeStep);
+        }
+
+        /**
+         * MAIN SEQUENCE
+         */
+        function startMainSequence() {
+            currentState = STATES.MAIN;
+            
+            mainVideo.style.opacity = '1';
+            mainVideo.volume = 1;
+            mainVideo.currentTime = 0;
+
+            mainVideo.play().catch(error => {
+                console.error("Main video failed to play", error);
+            });
+        }
+
+        /**
+         * FINAL SCREEN TRIGGER
+         */
+        mainVideo.addEventListener('ended', () => {
+            if (currentState !== STATES.MAIN) return;
+            currentState = STATES.ENDED;
+
+            // Cinematic fade to black
+            mainVideo.style.transition = "opacity 0.8s ease";
+            mainVideo.style.opacity = '0';
+
+            // Show final message after a short pause
+            setTimeout(() => {
+                document.body.style.cursor = 'default';
+                finalScreen.classList.add('visible');
+            }, 1000);
+        });
+
+        /**
+         * ACCEPT BUTTON LOGIC
+         */
+        acceptBtn.addEventListener('click', () => {
+            // End of experience. Disables button, leaves screen as is.
+            acceptBtn.disabled = true;
+            acceptBtn.style.opacity = '0.5';
+            acceptBtn.style.cursor = 'not-allowed';
+        });
+
+        // Start experience on page load
+        window.addEventListener('load', initExperience);
+
+    </script>
+</body>
+</html>
